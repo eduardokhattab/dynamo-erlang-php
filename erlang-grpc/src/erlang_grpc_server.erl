@@ -6,7 +6,9 @@
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {socket, db}).
+-record(state, {socket}).
+
+-define(TABLE_NAME, <<"key_value_table">>).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -18,9 +20,8 @@ init([]) ->
         {packet, 0}
     ]),
     io:format("Server gRPC (Protobuf/gpb) running on port 50051~n"),
-    Db = ets:new(kv_db, [set, public]),
-    spawn(fun() -> accept_loop(ListenSocket, Db) end),
-    {ok, #state{socket = ListenSocket, db = Db}}.
+    spawn(fun() -> accept_loop(ListenSocket) end),
+    {ok, #state{socket = ListenSocket}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -38,29 +39,29 @@ terminate(_Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-accept_loop(ListenSocket, Db) ->
+accept_loop(ListenSocket) ->
     case gen_tcp:accept(ListenSocket) of
         {ok, Socket} ->
             io:format("Client connected: ~p~n", [Socket]),
             gen_tcp:controlling_process(Socket, self()),
-            spawn(fun() -> handle_client(Socket, Db) end),
-            accept_loop(ListenSocket, Db);
+            spawn(fun() -> handle_client(Socket) end),
+            accept_loop(ListenSocket);
         {error, closed} ->
             ok
     end.
 
-handle_client(Socket, Db) ->
+handle_client(Socket) ->
     case gen_tcp:recv(Socket, 0) of
         {ok, Data} ->
-            process_request(Data, Socket, Db),
-            handle_client(Socket, Db);
+            process_request(Data, Socket),
+            handle_client(Socket);
         {error, closed} ->
             io:format("Client disconnected.~n"),
             gen_tcp:close(Socket),
             ok
     end.
 
-process_request(BinaryList, Socket, Db) ->
+process_request(BinaryList, Socket) ->
     Binary = list_to_binary(BinaryList),
     
     io:format("binary received with ~p bytes: ~p~n", [size(Binary), Binary]),
@@ -77,28 +78,14 @@ process_request(BinaryList, Socket, Db) ->
                         Value = Data#'data'.value,
 
                         io:format("SET key=~s, value=~s~n", [Key, Value]),
-                        ets:insert(Db, {Key, Value}),
-                        
-                        Resp = #'set_response'{error = ok},
-                        EnvResp = #'req_envelope'{type = set_response_t, set_resp = Resp},
-                        send_response(EnvResp, Socket);
-
+                        put_dynamo_item(Key, Value, Socket);
                     #'req_envelope'{type = get_request_t, get_req = Req} ->
                         io:format("Request GET received.~n"),
                         Key = Req#'get_request'.key,
 
                         io:format("GET key=~s~n", [Key]),
-                        case ets:lookup(Db, Key) of
-                            [{_Key, Value}] ->
-                                Data = #'data'{key = Key, value = Value},
-                                Resp = #'get_response'{error = ok, req = Data},
-                                EnvResp = #'req_envelope'{type = get_response_t, get_resp = Resp},
-                                send_response(EnvResp, Socket);
-                            [] ->
-                                Resp = #'get_response'{error = not_found},
-                                EnvResp = #'req_envelope'{type = get_response_t, get_resp = Resp},
-                                send_response(EnvResp, Socket)
-                        end;
+
+                        get_dynamo_item(Key, Socket);
                     _ ->
                         io:format("Unknown message type: ~p~n", [Env]),
                         ok
@@ -116,6 +103,68 @@ process_request(BinaryList, Socket, Db) ->
             ok
     end.
 
+put_dynamo_item(Key, Value, Socket) ->
+    Item = [
+        {<<"key">>, Key},
+        {<<"value">>, Value}
+    ],
+
+    case erlcloud_ddb2:put_item(?TABLE_NAME, Item) of
+        {ok, _} ->
+            Resp = #'set_response'{error = ok},
+            EnvResp = #'req_envelope'{type = set_response_t, set_resp = Resp},
+            send_response(EnvResp, Socket);
+        {error, Reason} ->
+            io:format("Error saving on DynamoDB: ~p~n", [Reason]),
+            Resp = #'set_response'{error = internal},
+            EnvResp = #'req_envelope'{type = set_response_t, set_resp = Resp},
+            send_response(EnvResp, Socket)
+    end.
+
+
+get_dynamo_item(Key, Socket) ->
+    KeyMap = [
+        {<<"key">>, {s, Key}}
+    ],
+
+    try
+        case erlcloud_ddb2:get_item(?TABLE_NAME, KeyMap) of
+            {ok, ItemList} when is_list(ItemList), ItemList =/= [] ->
+                io:format("Item found: ~p~n", [ItemList]),
+
+                RetrievedKey = case lists:keyfind(<<"key">>, 1, ItemList) of
+                    {<<"key">>, K} -> K;
+                    _ -> Key
+                end,
+
+                RetrievedValue = case lists:keyfind(<<"value">>, 1, ItemList) of
+                    {<<"value">>, V} -> V;
+                    _ -> <<"">>
+                end,
+
+                Data = #'data'{key = RetrievedKey, value = RetrievedValue},
+                SuccessResp = #'get_response'{error = ok, req = Data},
+                SuccessEnvResp = #'req_envelope'{type = get_response_t, get_resp = SuccessResp},
+                send_response(SuccessEnvResp, Socket);
+
+            {ok, []} ->
+                NotFoundResp = #'get_response'{error = not_found},
+                NotFoundEnvResp = #'req_envelope'{type = get_response_t, get_resp = NotFoundResp},
+                send_response(NotFoundEnvResp, Socket);
+
+            {error, Reason} ->
+                io:format("Error getting from DynamoDB: ~p~n", [Reason]),
+                ErrorResp = #'get_response'{error = internal},
+                ErrorEnvResp = #'req_envelope'{type = get_response_t, get_resp = ErrorResp},
+                send_response(ErrorEnvResp, Socket)
+        end
+    catch
+        _Class:Error ->
+            io:format("Exception in get_dynamo_item: ~p~n", [Error]),
+            ExceptionResp = #'get_response'{error = internal},
+            ExceptionEnvResp = #'req_envelope'{type = get_response_t, get_resp = ExceptionResp},
+            send_response(ExceptionEnvResp, Socket)
+    end.
 
 send_response(Message, Socket) ->
     Binary = key_value_pb:encode_msg(Message),

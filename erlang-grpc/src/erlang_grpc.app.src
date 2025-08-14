@@ -5,7 +5,9 @@
     {mod, {erlang_grpc_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        erlcloud,
+        lhttpc
     ]},
     {env, []},
     {modules, []},
