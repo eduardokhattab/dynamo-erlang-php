@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Table DynamoDB'
+
+Resources:
+  KeyValueTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    Properties:
+      TableName: 'key_value_table'
+      AttributeDefinitions:
+        - AttributeName: 'key'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'key'
+          KeyType: 'HASH'
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  TableName:
+    Description: 'DynamoDB table name'
+    Value: !Ref KeyValueTable
+  
+  TableArn:
+    Description: 'ARN DynamoDB'
+    Value: !GetAtt KeyValueTable.Arn
