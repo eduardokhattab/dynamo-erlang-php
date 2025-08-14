@@ -1,0 +1,46 @@
+package kv.proto;
+
+message data {
+    required string key = 1;
+    required string value = 2;
+}
+
+message set_request {
+    required data req = 1;
+}
+
+message set_response {
+    enum error_t {
+        ok = 1;
+        internal = 2;
+     }
+    required error_t error = 1;
+}
+
+message get_request {
+    required string key = 1;
+}
+
+message get_response {
+    enum error_t {
+        ok = 1;
+        not_found = 2;
+        internal = 3;
+    }
+    required error_t error = 1;
+    optional data req = 2;
+}
+
+message req_envelope {
+    enum msg_type {
+        set_request_t = 1;
+        set_response_t = 2;
+        get_request_t = 3;
+        get_response_t = 4;
+    }
+    required msg_type type = 1;
+    optional set_request set_req = 2;
+    optional set_response set_resp = 3;
+    optional get_request get_req = 4;
+    optional get_response get_resp = 5;
+}
