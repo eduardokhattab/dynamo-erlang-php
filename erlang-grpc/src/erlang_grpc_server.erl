@@ -9,7 +9,7 @@
 -record(state, {socket}).
 
 -define(TABLE_NAME, <<"key_value_table">>).
--define(KMS_KEY_ID, "alias/key_value_table_kms").
+-define(KMS_KEY_ID, "alias/key_value_table_kms_key").
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

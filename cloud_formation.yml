@@ -1,7 +1,56 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Table DynamoDB'
+Description: 'DynamoDB table with KMS key for envelope encryption'
 
 Resources:
+  KeyValueKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'KMS key for encrypting data in key_value_table DynamoDB'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'Enable IAM Root Permissions for Admin'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+              - 'kms:CreateAlias'
+              - 'kms:DeleteAlias'
+              - 'kms:UpdateAlias'
+            Resource: '*'
+          - Sid: 'Allow use of the key for application user'
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt KeyValueAppUser.Arn
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+      Tags:
+      - Key: 'Name'
+        Value: !Sub 'key_value_table_kms_key'
+
+  KeyValueKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: 'alias/key_value_table_kms_key'
+      TargetKeyId: !Ref KeyValueKMSKey
+
   KeyValueTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -15,11 +64,105 @@ Resources:
           KeyType: 'HASH'
       BillingMode: PAY_PER_REQUEST
 
+  KeyValueAppUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: 'KeyValueApp-User'
+
+  KeyValueDynamoDBPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'KeyValueDynamoDBAccess'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'dynamodb:GetItem'
+              - 'dynamodb:PutItem'
+              - 'dynamodb:UpdateItem'
+              - 'dynamodb:DeleteItem'
+              - 'dynamodb:Query'
+              - 'dynamodb:Scan'
+            Resource: !GetAtt KeyValueTable.Arn
+      Users:
+        - !Ref KeyValueAppUser
+
+  KeyValueKMSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'KeyValueKMSAccess'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: !GetAtt KeyValueKMSKey.Arn
+      Users:
+        - !Ref KeyValueAppUser
+
+  KeyValueAppAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref KeyValueAppUser
+      Status: Active
+
 Outputs:
-  TableName:
-    Description: 'DynamoDB table name'
+  DynamoDBTableName:
+    Description: 'Name of DynamoDB table'
     Value: !Ref KeyValueTable
-  
-  TableArn:
-    Description: 'ARN DynamoDB'
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoDBTable'
+
+  DynamoDBTableArn:
+    Description: 'ARN of DynamoDB table'
     Value: !GetAtt KeyValueTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoDBTableArn'
+
+  KMSKeyId:
+    Description: 'KMS Key ID'
+    Value: !Ref KeyValueKMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyId'
+
+  KMSKeyArn:
+    Description: 'KMS Key ARN'
+    Value: !GetAtt KeyValueKMSKey.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyArn'
+  
+  KMSKeyAlias:
+    Description: 'KMS Key Alias'
+    Value: !Ref KeyValueKMSKeyAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyAlias'
+  
+  IAMUserName:
+    Description: 'IAM username'
+    Value: !Ref KeyValueAppUser
+    Export:
+      Name: !Sub '${AWS::StackName}-IAMUser'
+
+  IAMUserArn:
+    Description: 'IAM user ARN'
+    Value: !GetAtt KeyValueAppUser.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-IAMUserArn'
+
+  AWSAccessKeyId:
+    Description: 'AWS Access Key ID'
+    Value: !Ref KeyValueAppAccessKey
+    Export:
+      Name: !Sub '${AWS::StackName}-AccessKeyId'
+
+  AWSSecretAccessKey:
+    Description: 'AWS Secret Access Key'
+    Value: !GetAtt KeyValueAppAccessKey.SecretAccessKey
+    Export:
+      Name: !Sub '${AWS::StackName}-SecretAccessKey'
