@@ -47,6 +47,7 @@ accept_loop(ListenSocket) ->
             gen_tcp:controlling_process(Socket, self()),
             spawn(fun() -> handle_client(Socket) end),
             accept_loop(ListenSocket);
+
         {error, closed} ->
             ok
     end.
@@ -56,6 +57,7 @@ handle_client(Socket) ->
         {ok, Data} ->
             process_request(Data, Socket),
             handle_client(Socket);
+
         {error, closed} ->
             io:format("Client disconnected.~n"),
             gen_tcp:close(Socket),
@@ -91,9 +93,11 @@ process_request(BinaryList, Socket) ->
                         io:format("Unknown message type: ~p~n", [Env]),
                         ok
                 end;
+
             {error, Reason} ->
                 io:format("Protobuf Decoding Error: ~p~n", [Reason]),
                 ok;
+
             Other ->
                 io:format("decode_msg unexpect return: ~p~n", [Other]),
                 ok
@@ -176,22 +180,13 @@ get_dynamo_item(Key, Socket) ->
             {ok, ItemList} when is_list(ItemList), ItemList =/= [] ->
                 io:format("Item found: ~p~n", [ItemList]),
 
-                RetrievedKey = case lists:keyfind(<<"key">>, 1, ItemList) of
-                    {<<"key">>, K} -> K;
-                    _ -> Key
-                end,
+                {<<"value">>, EncodedPayload} = lists:keyfind(<<"value">>, 1, ItemList),
+                {<<"data_key">>, EncodedDataKey} = lists:keyfind(<<"data_key">>, 1, ItemList),
 
-                RetrievedValue = case lists:keyfind(<<"value">>, 1, ItemList) of
-                    {<<"value">>, V} -> V;
-                    _ -> <<"">>
-                end,
-
-                Data = #'data'{key = RetrievedKey, value = RetrievedValue},
-                SuccessResp = #'get_response'{error = ok, req = Data},
-                SuccessEnvResp = #'req_envelope'{type = get_response_t, get_resp = SuccessResp},
-                send_response(SuccessEnvResp, Socket);
+                decrypt_and_respond(Key, EncodedPayload, EncodedDataKey, Socket);
 
             {ok, []} ->
+                io:format("Item not found~n"),
                 NotFoundResp = #'get_response'{error = not_found},
                 NotFoundEnvResp = #'req_envelope'{type = get_response_t, get_resp = NotFoundResp},
                 send_response(NotFoundEnvResp, Socket);
@@ -213,3 +208,48 @@ get_dynamo_item(Key, Socket) ->
 send_response(Message, Socket) ->
     Binary = key_value_pb:encode_msg(Message),
     gen_tcp:send(Socket, Binary).
+
+decrypt_and_respond(Key, EncodedPayload, EncodedDataKey, Socket) ->
+    try
+        io:format("Decrypting data~n"),
+
+        Payload = base64:decode(EncodedPayload),
+        EncryptedDataKey = base64:decode(EncodedDataKey),
+
+        <<IV:12/binary, AuthTag:16/binary, CipherText/binary>> = Payload,
+
+        case erlcloud_kms:decrypt(EncryptedDataKey) of
+            {ok, DecryptResult} ->
+                PlaintextKeyBase64 = proplists:get_value(<<"Plaintext">>, DecryptResult),
+
+                PlaintextKey = base64:decode(PlaintextKeyBase64),
+
+                io:format("Data Key decrypted - Base64: ~p bytes, Decoded: ~p bytes~n",
+                         [byte_size(PlaintextKeyBase64), byte_size(PlaintextKey)]),
+
+                OriginalValue = crypto:crypto_one_time_aead(
+                    aes_256_gcm, PlaintextKey, IV, CipherText, <<>>, AuthTag, false
+                ),
+
+                io:format("Data decrypted (~p bytes)~n", [byte_size(OriginalValue)]),
+
+                Data = #'data'{key = Key, value = OriginalValue},
+                SuccessResp = #'get_response'{error = ok, req = Data},
+                SuccessEnvResp = #'req_envelope'{type = get_response_t, get_resp = SuccessResp},
+                send_response(SuccessEnvResp, Socket);
+
+            {error, KmsError} ->
+                io:format("Error decrypting Data Key: ~p~n", [KmsError]),
+                KmsErrorResp = #'get_response'{error = internal},
+                KmsErrorEnvResp = #'req_envelope'{type = get_response_t, get_resp = KmsErrorResp},
+                send_response(KmsErrorEnvResp, Socket)
+        end
+
+    catch
+        Class:Error:Stacktrace ->
+            io:format("Error on decrypting - Class: ~p, Error: ~p~n", [Class, Error]),
+            io:format("Stacktrace: ~p~n", [Stacktrace]),
+            ExceptionResp = #'get_response'{error = internal},
+            ExceptionEnvResp = #'req_envelope'{type = get_response_t, get_resp = ExceptionResp},
+            send_response(ExceptionEnvResp, Socket)
+    end.
