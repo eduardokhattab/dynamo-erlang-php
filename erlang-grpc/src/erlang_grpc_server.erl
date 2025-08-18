@@ -9,6 +9,7 @@
 -record(state, {socket}).
 
 -define(TABLE_NAME, <<"key_value_table">>).
+-define(KMS_KEY_ID, "alias/key_value_table_kms").
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -104,23 +105,66 @@ process_request(BinaryList, Socket) ->
     end.
 
 put_dynamo_item(Key, Value, Socket) ->
-    Item = [
-        {<<"key">>, Key},
-        {<<"value">>, Value}
-    ],
+    try
+        io:format("Encrypting data with envelope encryption~n"),
 
-    case erlcloud_ddb2:put_item(?TABLE_NAME, Item) of
-        {ok, _} ->
-            Resp = #'set_response'{error = ok},
-            EnvResp = #'req_envelope'{type = set_response_t, set_resp = Resp},
-            send_response(EnvResp, Socket);
-        {error, Reason} ->
-            io:format("Error saving on DynamoDB: ~p~n", [Reason]),
-            Resp = #'set_response'{error = internal},
-            EnvResp = #'req_envelope'{type = set_response_t, set_resp = Resp},
-            send_response(EnvResp, Socket)
+        KeyIdBinary = list_to_binary(?KMS_KEY_ID),
+        Options = [{number_of_bytes, 32}],
+
+        case erlcloud_kms:generate_data_key(KeyIdBinary, Options) of
+            {ok, DataKeyResult} ->
+                PlaintextKeyBase64 = proplists:get_value(<<"Plaintext">>, DataKeyResult),
+                EncryptedKey = proplists:get_value(<<"CiphertextBlob">>, DataKeyResult),
+
+                PlaintextKey = base64:decode(PlaintextKeyBase64),
+
+                io:format("Data Key generated - Base64: ~p bytes, Decoded: ~p bytes~n",
+                         [byte_size(PlaintextKeyBase64), byte_size(PlaintextKey)]),
+
+                IV = crypto:strong_rand_bytes(12),
+                {CipherText, AuthTag} = crypto:crypto_one_time_aead(
+                    aes_256_gcm, PlaintextKey, IV, Value, <<>>, true
+                ),
+
+                Payload = <<IV/binary, AuthTag/binary, CipherText/binary>>,
+
+                io:format("Data encrypted (~p bytes -> ~p bytes)~n",
+                         [byte_size(Value), byte_size(Payload)]),
+
+                Item = [
+                    {<<"key">>, Key},
+                    {<<"value">>, base64:encode(Payload)},
+                    {<<"data_key">>, base64:encode(EncryptedKey)}
+                ],
+
+                case erlcloud_ddb2:put_item(?TABLE_NAME, Item) of
+                    {ok, _} ->
+                        io:format("Encrypted Item saved on DynamoDB~n"),
+                        OkResp = #'set_response'{error = ok},
+                        OkEnvResp = #'req_envelope'{type = set_response_t, set_resp = OkResp},
+                        send_response(OkEnvResp, Socket);
+                    {error, Reason} ->
+                        io:format("Errr saving on DynamoDB: ~p~n", [Reason]),
+                        ErrorResp = #'set_response'{error = internal},
+                        ErrorEnvResp = #'req_envelope'{type = set_response_t, set_resp = ErrorResp},
+                        send_response(ErrorEnvResp, Socket)
+                end;
+
+            {error, KmsError} ->
+                io:format("Error generating Data Key: ~p~n", [KmsError]),
+                KmsErrorResp = #'set_response'{error = internal},
+                KmsErrorEnvResp = #'req_envelope'{type = set_response_t, set_resp = KmsErrorResp},
+                send_response(KmsErrorEnvResp, Socket)
+        end
+
+    catch
+        Class:Error:Stacktrace ->
+            io:format("Error on encrypt - Class: ~p, Error: ~p~n", [Class, Error]),
+            io:format("Stacktrace: ~p~n", [Stacktrace]),
+            CatchResp = #'set_response'{error = internal},
+            CatchEnvResp = #'req_envelope'{type = set_response_t, set_resp = CatchResp},
+            send_response(CatchEnvResp, Socket)
     end.
-
 
 get_dynamo_item(Key, Socket) ->
     KeyMap = [
