@@ -138,7 +138,7 @@ put_dynamo_item(Key, Value, Socket) ->
                 Item = [
                     {<<"key">>, Key},
                     {<<"value">>, base64:encode(Payload)},
-                    {<<"data_key">>, base64:encode(EncryptedKey)}
+                    {<<"data_key">>, {b, EncryptedKey}}  
                 ],
 
                 case erlcloud_ddb2:put_item(?TABLE_NAME, Item) of
@@ -214,11 +214,10 @@ decrypt_and_respond(Key, EncodedPayload, EncodedDataKey, Socket) ->
         io:format("Decrypting data~n"),
 
         Payload = base64:decode(EncodedPayload),
-        EncryptedDataKey = base64:decode(EncodedDataKey),
 
         <<IV:12/binary, AuthTag:16/binary, CipherText/binary>> = Payload,
 
-        case erlcloud_kms:decrypt(EncryptedDataKey) of
+        case erlcloud_kms:decrypt(EncodedDataKey) of
             {ok, DecryptResult} ->
                 PlaintextKeyBase64 = proplists:get_value(<<"Plaintext">>, DecryptResult),
 
