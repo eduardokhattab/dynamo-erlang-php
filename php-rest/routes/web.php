@@ -4,7 +4,6 @@
 use Illuminate\Http\Request;
 use Aws\Kms\KmsClient;
 use Aws\DynamoDb\DynamoDbClient;
-// use Ramsey\Uuid\Uuid;
 
 /** @var \Laravel\Lumen\Routing\Router $router */
 
@@ -91,4 +90,111 @@ $router->post('/save', function (Request $request) use ($router) {
         'key' => $key,
         'value' => $value
     ], 200);
+});
+
+$router->get('/get/{key}', function (Request $request, $key) use ($router) {
+    try {
+        echo "Retrieving and decrypting data for key: {$key}\n";
+
+        $kmsClient = app('aws')->createKms();
+        $dynamoDb = app('aws')->createDynamoDb();
+        $tableName = env('DYNAMODB_TABLE');
+
+        try {
+            $result = $dynamoDb->getItem([
+                'TableName' => $tableName,
+                'Key' => [
+                    'key' => ['S' => $key]
+                ]
+            ]);
+
+            if (!isset($result['Item'])) {
+                echo "Item not found\n";
+                return response()->json([
+                    'error' => 'not_found'
+                ], 404);
+            }
+
+            $item = $result['Item'];
+            $encryptedValue = $item['value']['S'];
+            $rawDataKey = $item['data_key']['B'];
+
+            echo "Item found in DynamoDB\n";
+            echo sprintf("Encrypted value length: %d chars\n", strlen($encryptedValue));
+            echo sprintf("Raw data key length: %d bytes\n", strlen($rawDataKey));
+
+            $encryptedDataKey = base64_decode($rawDataKey);
+            
+            echo sprintf("After base64 decode - data key length: %d bytes\n", strlen($encryptedDataKey));
+
+        } catch (Exception $e) {
+            echo "Error getting from DynamoDB: " . $e->getMessage() . "\n";
+            return response()->json([
+                'error' => 'internal'
+            ], 500);
+        }
+
+        try {
+            echo "Decrypting data key with KMS\n";
+            
+            $decryptResult = $kmsClient->decrypt([
+                'CiphertextBlob' => $encryptedDataKey
+            ]);
+
+            $plaintextKeyBase64 = base64_encode($decryptResult['Plaintext']);
+            $plaintextKey = $decryptResult['Plaintext'];
+
+            echo sprintf(
+                "Data Key decrypted - Base64: %d bytes, Binary: %d bytes\n",
+                strlen($plaintextKeyBase64),
+                strlen($plaintextKey)
+            );
+
+        } catch (Exception $e) {
+            echo "Error decrypting Data Key: " . $e->getMessage() . "\n";
+            return response()->json([
+                'error' => 'internal'
+            ], 500);
+        }
+
+        try {
+            echo "Decrypting data\n";
+            
+            $payload = base64_decode($encryptedValue);
+            
+            $iv = substr($payload, 0, 12);
+            $authTag = substr($payload, 12, 16);
+            $ciphertext = substr($payload, 28);
+
+            echo sprintf("Payload breakdown - IV: 12 bytes, AuthTag: 16 bytes, CipherText: %d bytes\n", strlen($ciphertext));
+
+            $originalValue = openssl_decrypt(
+                $ciphertext,
+                'aes-256-gcm',
+                $plaintextKey,
+                OPENSSL_RAW_DATA,
+                $iv,
+                $authTag
+            );
+
+            echo sprintf("Data decrypted (%d bytes)\n", strlen($originalValue));
+
+            return response()->json([
+                'key' => $key,
+                'value' => $originalValue
+            ], 200);
+
+        } catch (Exception $e) {
+            echo "Error decrypting data: " . $e->getMessage() . "\n";
+            return response()->json([
+                'error' => 'internal'
+            ], 500);
+        }
+
+    } catch (Exception $e) {
+        echo "Unexpected error: " . $e->getMessage() . "\n";
+        return response()->json([
+            'error' => 'internal'
+        ], 500);
+    }
 });
