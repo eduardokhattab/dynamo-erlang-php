@@ -61,9 +61,9 @@ Also, in an infra-wise, we could deploy N servers to handle the requests, with a
 
 3. What was more challenging in the development of the service?
 
-> Learning the Erlang syntax/workflow. Besides that, there isn't a big number of examples available on the internet.
-> Working with crypto algorithms
-> Debug Erlang code
+> - Learning the Erlang syntax/workflow. Besides that, there isn't a big number of examples available on the internet.
+> - Working with crypto algorithms
+> - Debug Erlang code
 
 4. If I had infinite time how would I improve the service?
 
@@ -76,4 +76,4 @@ Also, in an infra-wise, we could deploy N servers to handle the requests, with a
 > - Performance and profilling tests
 > - Improve documentation
 > - Use env variables
-
+> - Better error handling
