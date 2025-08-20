@@ -1,0 +1,203 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "HTTP API for DynamoDB and KMS",
+        "description": "API for saving and retrieving encrypted data using AWS KMS and DynamoDB with envelope encryption",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "/",
+            "description": "API Server"
+        }
+    ],
+    "paths": {
+        "/api/save": {
+            "post": {
+                "tags": [
+                    "Key/Value"
+                ],
+                "summary": "Save encrypted data",
+                "description": "Encrypts and saves data",
+                "operationId": "saveEncryptedData",
+                "requestBody": {
+                    "description": "Data to be encrypted and saved",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "key",
+                                    "value"
+                                ],
+                                "properties": {
+                                    "key": {
+                                        "description": "Unique key to identify the data",
+                                        "type": "string",
+                                        "example": "key"
+                                    },
+                                    "value": {
+                                        "description": "Value to be encrypted and stored",
+                                        "type": "string",
+                                        "example": "value"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Data saved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "type": {
+                                            "type": "string",
+                                            "example": "set_response"
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "ok"
+                                        },
+                                        "key": {
+                                            "type": "string",
+                                            "example": "key"
+                                        },
+                                        "value": {
+                                            "description": "Original value (decrypted) returned for confirmation",
+                                            "type": "string",
+                                            "example": "value"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "example": "The value field is required."
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Server Error"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/get/{key}": {
+            "get": {
+                "tags": [
+                    "Key/Value"
+                ],
+                "summary": "Retrieve decrypted data",
+                "description": "Retrieves and decrypts data using the provided key",
+                "operationId": "getDecryptedData",
+                "parameters": [
+                    {
+                        "name": "key",
+                        "in": "path",
+                        "description": "Unique key to identify the stored data",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "example": "key"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Data retrieved and decrypted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "key": {
+                                            "description": "Key used to retrieve the data",
+                                            "type": "string",
+                                            "example": "key"
+                                        },
+                                        "value": {
+                                            "description": "Decrypted value",
+                                            "type": "string",
+                                            "example": "value"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Key not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "not_found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "internal"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Key/Value",
+            "description": "Data encryption and decryption operations"
+        }
+    ]
+}

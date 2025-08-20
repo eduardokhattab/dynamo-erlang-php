@@ -1,26 +1,59 @@
-# Lumen PHP Framework
+php_rest
+=====
 
-[![Build Status](https://travis-ci.org/laravel/lumen-framework.svg)](https://travis-ci.org/laravel/lumen-framework)
-[![Total Downloads](https://img.shields.io/packagist/dt/laravel/lumen-framework)](https://packagist.org/packages/laravel/lumen-framework)
-[![Latest Stable Version](https://img.shields.io/packagist/v/laravel/lumen-framework)](https://packagist.org/packages/laravel/lumen-framework)
-[![License](https://img.shields.io/packagist/l/laravel/lumen)](https://packagist.org/packages/laravel/lumen-framework)
+A Lumen PHP application
 
-Laravel Lumen is a stunningly fast PHP micro-framework for building web applications with expressive, elegant syntax. We believe development must be an enjoyable, creative experience to be truly fulfilling. Lumen attempts to take the pain out of development by easing common tasks used in the majority of web projects, such as routing, database abstraction, queueing, and caching.
+This is an HTTP Server
 
-> **Note:** In the years since releasing Lumen, PHP has made a variety of wonderful performance improvements. For this reason, along with the availability of [Laravel Octane](https://laravel.com/docs/octane), we no longer recommend that you begin new projects with Lumen. Instead, we recommend always beginning new projects with [Laravel](https://laravel.com).
+Build
+-----
 
-## Official Documentation
+    $ composer install
 
-Documentation for the framework can be found on the [Lumen website](https://lumen.laravel.com/docs).
+Prerequisites
+-----
+Make sure to create all the needed AWS resources with the CloudFormation Template. The process is described on the [previous README.md](../README.md)
 
-## Contributing
+Once you have created the resources, get the **AWS_ACCESS_KEY_ID** and **AWS_SECRET_ACCESS_KEY** to execute the app.
 
-Thank you for considering contributing to Lumen! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Execution
+-----
 
-## Security Vulnerabilities
+### Server
 
-If you discover a security vulnerability within Lumen, please send an e-mail to Taylor Otwell at taylor@laravel.com. All security vulnerabilities will be promptly addressed.
+Create an .env file and paste the generated keys there
 
-## License
+    $ cp .env.example .env
 
-The Lumen framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Run the server
+
+    $ php -S localhost:8000 -t public
+    
+```sh
+$ curl -X POST \
+    http://localhost:8000/api/save \
+    -H 'Content-Type: application/json' \
+    -d '{
+        "key": "key",
+        "value": "value"
+    }'
+```
+```sh
+curl -X GET http://localhost:8000/api/get/key
+```
+
+To analyze the data encrypted, check the DynamoDB table on AWS
+
+### Swagger (OpenAPI)
+
+This project implements Swagger OpenAPI to document the routes. To access it, go to http://localhost:8000/swagger.
+
+To apply your changes, regenerate the docs using
+
+```sh
+php artisan swagger-lume:generate
+```
+
+#### Data bigger than 4kb
+
+In order to save data bigger than 4kb, this application is using KMS Data Keys instead of the common Customer Managed Keys (CMK) encrypt/decrypt functions. To test the functionality, use the [big file content](../big_content_value.txt) as a payload value. It contains more than 4kb of size.

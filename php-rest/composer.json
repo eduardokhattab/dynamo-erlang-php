@@ -7,6 +7,8 @@
     "require": {
         "php": "^8.1",
         "aws/aws-sdk-php-laravel": "^3.10",
+        "darkaonline/swagger-lume": "10.*",
+        "zircote/swagger-php": "3.3.7",
         "laravel/lumen-framework": "^10.0"
     },
     "require-dev": {

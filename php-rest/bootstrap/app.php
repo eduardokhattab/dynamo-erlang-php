@@ -97,6 +97,10 @@ $app->configure('app');
 // $app->register(App\Providers\AuthServiceProvider::class);
 // $app->register(App\Providers\EventServiceProvider::class);
 
+$app->configure('swagger-lume');
+
+$app->register(\SwaggerLume\ServiceProvider::class);
+
 /*
 |--------------------------------------------------------------------------
 | Load The Application Routes
